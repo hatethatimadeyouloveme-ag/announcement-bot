@@ -87,7 +87,7 @@ jobs:
           if message:
               embed["description"] = message[:4000]
 
-          payload = {"username": "Announcement", "embeds": [embed]}
+          payload = {"username": "ASA BABYMONSTER", "embeds": [embed]}
 
           request = urllib.request.Request(
               url,
