@@ -9,36 +9,28 @@ on:
       title:
         description: "Judul announcement"
         required: false
-        default: "🚀 Update terbaru"
       message:
         description: "Isi announcement"
         required: false
-        default: "Project baru sudah siap"
 
 jobs:
   send-discord:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Validate Discord webhook URL
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          # Buang spasi / enter yang tidak sengaja ikut ke-paste
           URL="$(echo -n "$DISCORD_WEBHOOK_URL" | tr -d '[:space:]')"
 
           if [ -z "$URL" ]; then
             echo "Secret DISCORD_WEBHOOK_URL kosong atau tidak ditemukan."
-            echo "Buat di: Settings > Secrets and variables > Actions > New repository secret"
             exit 1
           fi
 
           if [[ ! "$URL" =~ ^https://(discord|discordapp)\.com/api/webhooks/ ]]; then
             echo "Format webhook URL tidak valid."
-            echo "Contoh yang benar: https://discord.com/api/webhooks/ID/TOKEN"
             exit 1
           fi
 
@@ -47,12 +39,12 @@ jobs:
       - name: Send announcement to Discord
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          TITLE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.title || format('🚀 Push to {0}', github.ref_name) }}
-          MESSAGE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.message || format('Commit by {0}', github.actor) }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TITLE: ${{ github.event.inputs.title }}
+          INPUT_MESSAGE: ${{ github.event.inputs.message }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
           REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
           ACTOR: ${{ github.actor }}
-          SHA: ${{ github.sha }}
         run: |
           python3 - <<'PY'
           import json
@@ -62,37 +54,34 @@ jobs:
           import urllib.request
 
           url = "".join(os.environ["DISCORD_WEBHOOK_URL"].split())
-          title = os.environ.get("TITLE", "GitHub Update")
-          message = os.environ.get("MESSAGE", "Update terbaru")
-          repo = os.environ.get("REPO", "")
-          branch = os.environ.get("BRANCH", "")
-          actor = os.environ.get("ACTOR", "")
-          sha = os.environ.get("SHA", "")[:7]
+          event = os.environ.get("EVENT", "")
 
-          payload = {
-              "username": "GitHub Bot",
-              "embeds": [
-                  {
-                      "title": title,
-                      "description": message,
-                      "color": 5814783,
-                      "fields": [
-                          {"name": "Repository", "value": repo, "inline": True},
-                          {"name": "Branch", "value": branch, "inline": True},
-                          {"name": "Author", "value": actor, "inline": True},
-                          {"name": "Commit", "value": sha, "inline": True},
-                      ],
-                      "footer": {"text": "GitHub Actions Notification"},
-                  }
-              ],
+          if event == "workflow_dispatch":
+              # Jalankan manual: pakai isian form (kalau kosong, pakai teks cadangan)
+              title = os.environ.get("INPUT_TITLE", "").strip() or "📢 Announcement"
+              message = os.environ.get("INPUT_MESSAGE", "").strip()
+          else:
+              # Push: baris pertama commit = judul, sisanya = isi
+              commit = os.environ.get("COMMIT_MSG", "").strip()
+              parts = commit.split("\n", 1)
+              title = parts[0].strip() or "📢 Announcement"
+              message = parts[1].strip() if len(parts) > 1 else ""
+
+          embed = {
+              "title": title[:256],
+              "color": 5814783,
+              "footer": {"text": f"oleh {os.environ.get('ACTOR', '')}"},
           }
+          if message:
+              embed["description"] = message[:4000]
+
+          payload = {"username": "GitHub Bot", "embeds": [embed]}
 
           request = urllib.request.Request(
               url,
               data=json.dumps(payload).encode("utf-8"),
               headers={
                   "Content-Type": "application/json",
-                  # Tanpa User-Agent, Discord sering menolak request Python (HTTP 403)
                   "User-Agent": "DiscordBot (github-actions, 1.0)",
               },
               method="POST",
