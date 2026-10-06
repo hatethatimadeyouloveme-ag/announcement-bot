@@ -4,13 +4,15 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "announcement.md"
   workflow_dispatch:
     inputs:
       title:
-        description: "Judul announcement"
+        description: "Judul (kosongkan untuk pakai announcement.md)"
         required: false
       message:
-        description: "Isi announcement"
+        description: "Isi (kosongkan untuk pakai announcement.md)"
         required: false
 
 jobs:
@@ -18,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Validate Discord webhook URL
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -39,11 +44,8 @@ jobs:
       - name: Send announcement to Discord
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          EVENT: ${{ github.event_name }}
           INPUT_TITLE: ${{ github.event.inputs.title }}
           INPUT_MESSAGE: ${{ github.event.inputs.message }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          REPO: ${{ github.repository }}
           ACTOR: ${{ github.actor }}
         run: |
           python3 - <<'PY'
@@ -52,30 +54,40 @@ jobs:
           import sys
           import urllib.error
           import urllib.request
+          from datetime import datetime, timezone
 
           url = "".join(os.environ["DISCORD_WEBHOOK_URL"].split())
-          event = os.environ.get("EVENT", "")
 
-          if event == "workflow_dispatch":
-              # Jalankan manual: pakai isian form (kalau kosong, pakai teks cadangan)
-              title = os.environ.get("INPUT_TITLE", "").strip() or "📢 Announcement"
-              message = os.environ.get("INPUT_MESSAGE", "").strip()
-          else:
-              # Push: baris pertama commit = judul, sisanya = isi
-              commit = os.environ.get("COMMIT_MSG", "").strip()
-              parts = commit.split("\n", 1)
-              title = parts[0].strip() or "📢 Announcement"
+          title = os.environ.get("INPUT_TITLE", "").strip()
+          message = os.environ.get("INPUT_MESSAGE", "").strip()
+
+          if not title:
+              # Baca announcement.md: baris pertama = judul, sisanya = isi
+              try:
+                  with open("announcement.md", encoding="utf-8") as f:
+                      text = f.read().strip()
+              except FileNotFoundError:
+                  print("File announcement.md tidak ditemukan.")
+                  sys.exit(1)
+
+              parts = text.split("\n", 1)
+              title = parts[0].lstrip("# ").strip()
               message = parts[1].strip() if len(parts) > 1 else ""
+
+          if not title:
+              print("Judul announcement kosong.")
+              sys.exit(1)
 
           embed = {
               "title": title[:256],
               "color": 5814783,
-              "footer": {"text": f"oleh {os.environ.get('ACTOR', '')}"},
+              "footer": {"text": f"Announcement oleh {os.environ.get('ACTOR', '')}"},
+              "timestamp": datetime.now(timezone.utc).isoformat(),
           }
           if message:
               embed["description"] = message[:4000]
 
-          payload = {"username": "GitHub Bot", "embeds": [embed]}
+          payload = {"username": "Announcement", "embeds": [embed]}
 
           request = urllib.request.Request(
               url,
